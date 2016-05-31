@@ -32,7 +32,7 @@ deploy:
   on:
     branch: Release
 - provider: WebDeploy
-  server: http://gofetch.cloudapp.net:8172/
+  server: http://gofetch.cloudapp.net:8172/msdeploy.axd
   website: Default Web Site
   username: gobd
   password:
