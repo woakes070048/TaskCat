@@ -30,6 +30,16 @@ deploy:
   sync_retry_attempts: 2
   on:
     branch: Release
+- provider: WebDeploy
+  server: http://gofetch.cloudapp.net:8172/
+  website: Default Web Site
+  username: gobd
+  password:
+    secure: jReD7kkgvep5pHJtDSv+pQ==
+  remove_files: true
+  app_offline: true
+  on:
+    branch: Prod
 notifications:
 - provider: HipChat
   room: GObd R&D
