@@ -13,9 +13,9 @@
 
     public class TaskCatAuthorizationServerProvider : OAuthAuthorizationServerProvider
     {
-        private readonly AccountContext authRepository;
+        private readonly IAccountContext authRepository;
 
-        public TaskCatAuthorizationServerProvider(AccountContext authRepository)
+        public TaskCatAuthorizationServerProvider(IAccountContext authRepository)
         {
             this.authRepository = authRepository;
         }
@@ -134,6 +134,9 @@
                     },
                     {
                         "userName", context.UserName
+                    },
+                    {
+                        "userId", user.Id
                     }
                 });
 
