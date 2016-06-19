@@ -26,8 +26,10 @@
     using Model.Identity;
     using System.Web.Http.Routing;
     using Email;
+    using Its.Configuration;
+    using App.Settings;
 
-    public class AccountContext
+    public class AccountContext : IAccountContext
     {
         // FIXME: direct dbContext usage in repo.. Should I?
         private readonly IDbContext dbContext;
@@ -55,7 +57,7 @@
         {
             UserProfile profile;
             User user = null;
-            
+
             switch (model.Type)
             {
                 case IdentityTypes.USER:
@@ -74,17 +76,23 @@
 
             }
 
-            var creationResult =  new AccountResult(await accountManager.CreateAsync(user, model.Password), user);
+            var creationResult = new AccountResult(await accountManager.CreateAsync(user, model.Password), user);
 
             return creationResult;
         }
 
-        public async Task<SendEmailResponse> NotifyUserCreationByMail(User user, HttpRequestMessage message )
+        public async Task<SendEmailResponse> NotifyUserCreationByMail(User user)
         {
-            var urlHelper = new UrlHelper(message);
             string code = await this.accountManager.GenerateEmailConfirmationTokenAsync(user.Id);
-            var confirmationUrl = new Uri(urlHelper.Link(AppConstants.ConfirmEmailRoute, new { userId = user.Id, code = code }));
-            var result = await mailService.SendWelcomeMail(new SendWelcomeEmailRequest() {
+
+            var clientSettings = Settings.Get<ClientSettings>();
+            clientSettings.Validate();
+
+            var confirmEmailRouteParams = new Dictionary<string, string>() { { "userId", user.Id }, { "code", code } };
+            var confirmationUrl = string.Concat(clientSettings.WebCatUrl, clientSettings.ConfirmEmailPath, confirmEmailRouteParams.ToQuerystring());
+
+            var result = await mailService.SendWelcomeMail(new SendWelcomeEmailRequest()
+            {
                 RecipientEmail = user.Email,
                 RecipientUsername = user.UserName,
                 ConfirmationUrl = confirmationUrl.ToString()
@@ -97,7 +105,7 @@
             return await accountManager.ConfirmEmailAsync(userId, code);
         }
 
-        internal async Task<Client> FindClient(string clientId)
+        public async Task<Client> FindClient(string clientId)
         {
             // FIXME: Im not sure whether we'd need a client manager or not, if there's no controller for it
             // I dont see a reason though
@@ -105,23 +113,23 @@
             return client;
         }
 
-        internal async Task<User> FindUser(string userName, string password)
+        public async Task<User> FindUser(string userName, string password)
         {
             return await accountManager.FindAsync(userName, password);
         }
 
-        internal async Task<User> FindUserByUserNameEmailPhoneNumber(string userKey, string password)
+        public async Task<User> FindUserByUserNameEmailPhoneNumber(string userKey, string password)
         {
             var user = await accountManager.FindByUserNameOrEmailOrPhoneNumber(userKey);
             return await FindUser(user.UserName, password);
         }
 
-        internal async Task<User> FindUserByEmail(string email, string password)
+        public async Task<User> FindUserByEmail(string email, string password)
         {
             return await accountManager.FindByEmailAsync(email, password);
         }
 
-        internal async Task<bool> AddRefreshToken(RefreshToken token)
+        public async Task<bool> AddRefreshToken(RefreshToken token)
         {
             var existingToken = await dbContext.RefreshTokens.Find(x => x.Subject == token.Subject && x.ClientId == token.ClientId).FirstOrDefaultAsync();
 
@@ -135,26 +143,26 @@
             return true;
         }
 
-        internal async Task<List<User>> FindAll(int page, int pageSize)
+        public async Task<List<User>> FindAll(int page, int pageSize)
         {
             if (page < 0)
                 throw new ArgumentException("Invalid page index provided");
             return await accountManager.FindAll(page * pageSize, pageSize);
         }
 
-        internal async Task<IQueryable<UserModel>> FindAllAsModel()
+        public async Task<IQueryable<UserModel>> FindAllAsModel()
         {
             return await accountManager.FindAllAsModel();
         }
 
-        internal async Task<List<UserModel>> FindAllAsModel(int page, int pageSize)
+        public async Task<List<UserModel>> FindAllAsModel(int page, int pageSize)
         {
             if (page < 0)
                 throw new ArgumentException("Invalid page index provided");
             return await accountManager.FindAllAsModel(page * pageSize, pageSize);
         }
 
-        internal async Task<PageEnvelope<UserModel>> FindAllEnvelopedAsModel(int page, int pageSize, HttpRequestMessage request)
+        public async Task<PageEnvelope<UserModel>> FindAllEnvelopedAsModel(int page, int pageSize, HttpRequestMessage request)
         {
             var data = await FindAllAsModel(page, pageSize);
             var total = await accountManager.GetTotalUserCount();
@@ -162,7 +170,7 @@
             return new PageEnvelope<UserModel>(total, page, pageSize, AppConstants.DefaultApiRoute, data, request);
         }
 
-        internal async Task<IdentityResult> Update(IdentityProfile profile, string userName)
+        public async Task<IdentityResult> Update(IdentityProfile profile, string userName)
         {
             var user = await accountManager.FindByNameAsync(userName);
             if (user.Type == IdentityTypes.USER && profile.GetType() != typeof(UserProfile))
@@ -182,14 +190,14 @@
                 var searchFilter = Builders<Job>.Filter.Exists(x => x.Assets[user.Id], true);
                 var propagationResult = await dbContext.Jobs.UpdateManyAsync(searchFilter, updateDef);
             }
-            else if(user.Roles.Any(x=>x=="Administrator" || x== "BackOfficeAdmin"))
+            else if (user.Roles.Any(x => x == "Administrator" || x == "BackOfficeAdmin"))
             {
                 var userModel = new UserModel(user);
                 var updateDef = Builders<Job>.Update.Set(x => x.JobServedBy, userModel);
                 var searchFilter = Builders<Job>.Filter.Where(x => x.JobServedBy.UserId == user.Id);
                 var propagationResult = await dbContext.Jobs.UpdateManyAsync(searchFilter, updateDef);
             }
-            else if(user.Type== IdentityTypes.USER && user.Type == IdentityTypes.ENTERPRISE)
+            else if (user.Type == IdentityTypes.USER && user.Type == IdentityTypes.ENTERPRISE)
             {
                 var userModel = user.Type == IdentityTypes.USER ? new UserModel(user) : new EnterpriseUserModel(user as EnterpriseUser);
                 var updateDef = Builders<Job>.Update.Set(x => x.User, userModel);
@@ -205,7 +213,7 @@
 
         }
 
-        internal async Task<IdentityResult> UpdateById(IdentityProfile model, string userId)
+        public async Task<IdentityResult> UpdateById(IdentityProfile model, string userId)
         {
             var user = await accountManager.FindByIdAsync(userId);
             // INFO: Not changing pic url this way. :)
@@ -216,7 +224,7 @@
             return await accountManager.UpdateAsync(user);
         }
 
-        internal async Task<bool> IsUsernameAvailable(string suggestedUsername)
+        public async Task<bool> IsUsernameAvailable(string suggestedUsername)
         {
             var user = await accountManager.FindByNameAsync(suggestedUsername);
             if (user == null)
@@ -224,7 +232,7 @@
             return false;
         }
 
-        internal async Task<bool> IsPhoneNumberAvailable(string phoneNumber)
+        public async Task<bool> IsPhoneNumberAvailable(string phoneNumber)
         {
             try
             {
@@ -239,7 +247,7 @@
             }
         }
 
-        internal async Task<bool> IsEmailAvailable(string email)
+        public async Task<bool> IsEmailAvailable(string email)
         {
             var user = await accountManager.FindByEmailAsync(email);
             if (user == null)
@@ -247,7 +255,7 @@
             return false;
         }
 
-        internal async Task<IdentityResult> UpdateUsername(string newUserName, string oldUserName)
+        public async Task<IdentityResult> UpdateUsername(string newUserName, string oldUserName)
         {
             var user = await accountManager.FindByNameAsync(oldUserName);
             if (await IsUsernameAvailable(newUserName))
@@ -261,7 +269,7 @@
             }
         }
 
-        internal async Task<IdentityResult> UpdateUsernameById(string userId, string newUserName)
+        public async Task<IdentityResult> UpdateUsernameById(string userId, string newUserName)
         {
             var user = await accountManager.FindByIdAsync(userId);
             if (await IsUsernameAvailable(newUserName))
@@ -277,13 +285,13 @@
 
         // FIXME: I can fix this I think, the route to userName search wont be necessary if I can
         // provide user id right away from authcontext;
-        internal async Task<IdentityResult> UpdatePassword(PasswordUpdateModel model, string userName)
+        public async Task<IdentityResult> UpdatePassword(PasswordUpdateModel model, string userName)
         {
             var user = await accountManager.FindByNameAsync(userName);
             return await accountManager.ChangePasswordAsync(user.Id, model.CurrentPassword, model.NewPassword);
         }
 
-        internal async Task<IdentityResult> UpdateContacts(ContactUpdateModel model, string userName)
+        public async Task<IdentityResult> UpdateContacts(ContactUpdateModel model, string userName)
         {
             var user = await accountManager.FindByNameAsync(userName);
             user.Email = model.Email;
@@ -292,15 +300,15 @@
             return await accountManager.UpdateAsync(user);
         }
 
-        internal async Task<User> FindUser(string userId)
+        public async Task<User> FindUser(string userId)
         {
-            var user =  await accountManager.FindByIdAsync(userId);
+            var user = await accountManager.FindByIdAsync(userId);
             if (user == null)
                 throw new EntityNotFoundException("User", userId);
             return user;
         }
 
-        internal async Task<UserModel> FindUserAsModel(string userId)
+        public async Task<UserModel> FindUserAsModel(string userId)
         {
             var user = await FindUser(userId);
 
@@ -308,30 +316,30 @@
             return user.ToModel(true);
         }
 
-        internal async Task<PageEnvelope<Job>> FindAssignedJobs(string userId, int page, int pageSize, DateTime? dateTimeUpto, JobState jobStateToFetchUpTo, SortDirection dateTimeSortDirection, HttpRequestMessage request)
+        public async Task<PageEnvelope<Job>> FindAssignedJobs(string userId, int page, int pageSize, DateTime? dateTimeUpto, JobState jobStateToFetchUpTo, SortDirection dateTimeSortDirection, HttpRequestMessage request)
         {
             QueryResult<Job> data = await jobManager.GetJobsAssignedToUser(userId, page * pageSize, pageSize, dateTimeUpto, jobStateToFetchUpTo, dateTimeSortDirection);
             return new PageEnvelope<Job>(data.Total, page, pageSize, AppConstants.DefaultApiRoute, data.Result, request, request.GetQueryNameValuePairs().ToDictionary(x => x.Key, y => y.Value));
         }
 
-        internal async Task<PageEnvelope<Job>> FindAssignedJobsByUserName(string userName, int page, int pageSize, DateTime? dateTimeUpto, JobState jobStateToFetchUpTo, SortDirection dateTimeSortDirection, HttpRequestMessage request)
+        public async Task<PageEnvelope<Job>> FindAssignedJobsByUserName(string userName, int page, int pageSize, DateTime? dateTimeUpto, JobState jobStateToFetchUpTo, SortDirection dateTimeSortDirection, HttpRequestMessage request)
         {
             var user = await accountManager.FindByNameAsync(userName);
             return await FindAssignedJobs(user.Id, page, pageSize, dateTimeUpto, jobStateToFetchUpTo, dateTimeSortDirection, request);
         }
 
-        internal async Task<bool> RemoveRefreshToken(RefreshToken refreshToken)
+        public async Task<bool> RemoveRefreshToken(RefreshToken refreshToken)
         {
             return await RemoveRefreshToken(refreshToken.Id);
         }
 
-        internal async Task<bool> RemoveRefreshToken(string hashedTokenId)
+        public async Task<bool> RemoveRefreshToken(string hashedTokenId)
         {
             var result = await dbContext.RefreshTokens.DeleteOneAsync(x => x.Id == hashedTokenId);
             return result.IsAcknowledged && result.DeletedCount == 1;
         }
 
-        internal async Task<RefreshToken> FindRefreshToken(string refreshTokenId)
+        public async Task<RefreshToken> FindRefreshToken(string refreshTokenId)
         {
             var refreshToken = await dbContext.RefreshTokens.Find(x => x.Id == refreshTokenId).FirstOrDefaultAsync();
             return refreshToken;
@@ -339,12 +347,12 @@
 
         // FIXME: This is literally a crime, like literally, no freaking paging or anything
         // But Im too tired to do this, Why the hell I ever saw OData
-        internal async Task<List<RefreshToken>> GetAllRefreshTokens()
+        public async Task<List<RefreshToken>> GetAllRefreshTokens()
         {
             return await dbContext.RefreshTokens.Find(x => true).ToListAsync();
         }
 
-        internal async Task<FileUploadModel> UploadAvatar(HttpContent content, string userId)
+        public async Task<FileUploadModel> UploadAvatar(HttpContent content, string userId)
         {
             var fileUploadModel = await blobService.UploadBlob(content, "avatar", AppConstants.SupportedImageFormats);
             var result = await accountManager.ChangeAvatar(userId, fileUploadModel.FileUrl);

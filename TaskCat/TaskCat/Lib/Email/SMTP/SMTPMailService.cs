@@ -15,7 +15,6 @@
         private SMTPMailSettings settings;
         private SmtpClient smtpclient;
         private ProprietorSettings propSettings;
-        private IFluentEmail mailFluent;
 
         public SMTPMailService()
         {
@@ -26,10 +25,6 @@
                 Credentials = new NetworkCredential(settings.Username, settings.Password),
                 EnableSsl = settings.EnableSSL
             };
-
-            mailFluent = Email
-               .From(settings.Username, propSettings.Name)
-               .UsingClient(smtpclient);
         }
 
         public void Dispose()
@@ -51,33 +46,26 @@
 
         public async Task<SendEmailResponse> SendWelcomeMail(SendWelcomeEmailRequest request)
         {
-            var email = mailFluent
-            .To(request.RecipientEmail)
-           .Subject("Welcome to " + propSettings.Name)
-           .UsingTemplate(EmailTemplatesConfig.WelcomeEmailTemplate, new WelcomeEmail()
-           {
-               Name = request.RecipientUsername,
-               ConfirmationUrl = request.ConfirmationUrl,
-               Proprietor = propSettings
-           });
+            var email = Email
+               .From(settings.Username, propSettings.Name)
+               .UsingClient(smtpclient)
+               .To(request.RecipientEmail)
+               .Subject("Welcome to " + propSettings.Name)
+               .UsingTemplate(EmailTemplatesConfig.WelcomeEmailTemplate, new WelcomeEmail()
+               {
+                   Name = request.RecipientUsername,
+                   ConfirmationUrl = request.ConfirmationUrl,
+                   Proprietor = propSettings
+               });
 
             try
             {
                 await smtpclient.SendMailAsync(email.Message);
-                return new SendEmailResponse()
-                {
-                    StatusCode = HttpStatusCode.OK,
-                    Success = true
-                };
+                return new SendEmailResponse(HttpStatusCode.OK);
             }
             catch (Exception ex)
             {
-                return new SendEmailResponse()
-                {
-                    Error = ex.Message,
-                    StatusCode = HttpStatusCode.InternalServerError,
-                    Success = false
-                };
+                return new SendEmailResponse(HttpStatusCode.InternalServerError, ex.Message);
             }
         }
     }
