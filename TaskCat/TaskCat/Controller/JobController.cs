@@ -26,6 +26,10 @@
     using Model.Pagination;
     using System.Web.Http.Description;
     using Lib.Email;
+    using Data.Entity.Identity;
+    using Model.Job;
+    using Data.Model.Operation;
+
 
     /// <summary>
     /// Controller to Post Custom Jobs, List, Delete and Update Jobs 
@@ -140,8 +144,8 @@
         /// A list of Jobs that complies with the query
         /// </returns>
         ///
-        [Authorize(Roles = "Asset, Administrator, BackOfficeAdmin")]
-        [ResponseType(typeof(Job))]
+        [Authorize]
+        [ResponseType(typeof(IEnumerable<Job>))]
         [Route("api/Job/odata", Name = AppConstants.DefaultOdataRoute)]
         [HttpGet]
         public async Task<IHttpActionResult> ListOdata(int pageSize = AppConstants.DefaultPageSize, int page = 0, bool envelope = true)
@@ -166,12 +170,36 @@
                     "envelope"
                 });
 
-            var jobs = await repository.GetJobs();
-            var queryResult = jobs.LinqToQuerystring(queryString: odataQuery).Skip(page * pageSize).Take(pageSize);
+            IQueryable<Job> jobs;
+            jobs = await repository.GetJobs();
+
+            if (IsUserOrEnterpriseUserOnly())
+            {
+                // INFO: You're in this block because the user is either just a regular user 
+                // or enterprise user , not an administrator or anything
+                // so he is only entitled to get the jobs he ordered 
+
+                jobs = jobs.Where(x => x.User.UserId == User.Identity.GetUserId()).AsQueryable();
+            }
+
+            var queryTotal = jobs.LinqToQuerystring(queryString: odataQuery);
+            var queryResult = queryTotal.Skip(page * pageSize).Take(pageSize);
 
             if (envelope)
-                return Json(new PageEnvelope<Job>(queryResult.LongCount(), page, pageSize, AppConstants.DefaultApiRoute, queryResult, this.Request));
+            {
+                Dictionary<string, string> otherParams = this.Request.GetQueryNameValuePairs().ToDictionary(x => x.Key, x => x.Value);                
+                return Json(new PageEnvelope<Job>(queryTotal.LongCount(), page, pageSize, AppConstants.DefaultOdataRoute, queryResult, this.Request, otherParams));
+            }
+                
             return Json(queryResult);
+        }
+
+        private bool IsUserOrEnterpriseUserOnly()
+        {
+            return ((User.IsInRole(RoleNames.ROLE_USER) || User.IsInRole(RoleNames.ROLE_ENTERPRISE))
+                && !User.IsInRole(RoleNames.ROLE_ADMINISTRATOR)
+                && !User.IsInRole(RoleNames.ROLE_ASSET)
+                && !User.IsInRole(RoleNames.ROLE_BACKOFFICEADMIN));
         }
 
         /// <summary>
@@ -325,8 +353,39 @@
         [HttpPatch]
         public async Task<IHttpActionResult> Update([FromUri]string jobId, [FromUri] string taskId, [FromBody] JsonPatchDocument<JobTask> taskPatch)
         {
-            ReplaceOneResult result = await repository.UpdateJobWithPatch(jobId, taskId, taskPatch);
+            ReplaceOneResult result = await repository.UpdateJobTaskWithPatch(jobId, taskId, taskPatch);
             return Json(result);
+        }
+
+        /// <summary>
+        /// Cancel a job with specific job id
+        /// </summary>
+        /// <returns></returns>
+        [ResponseType(typeof(UpdateResult<Job>))]
+        [HttpPost]
+        [Authorize(Roles = "Administrator, BackOfficeAdmin")]
+        [Route("api/Job/cancel/{jobId}")]
+        public async Task<IHttpActionResult> CancelJob(JobCancellationRequest request)
+        {
+            return Json(await repository.CancelJob(request));
+        }
+
+        /// <summary>
+        /// Restores a freezed job with a specific job id
+        /// </summary>
+        /// <remarks>
+        /// A job can freeze itslef if its deleted or cancelled
+        /// All outstanding and future changes for a job would be rejected unless it is restored
+        /// </remarks>
+        /// <returns></returns>
+        /// 
+        [ResponseType(typeof(UpdateResult<Job>))]
+        [HttpPost]
+        [Authorize(Roles = "Administrator, BackOfficeAdmin")]
+        [Route("api/Job/restore/{jobId}")]
+        public async Task<IHttpActionResult> RestoreJob(string jobId)
+        {
+            return Json(await repository.RestoreJob(jobId));
         }
 
         /// <summary>
@@ -343,14 +402,39 @@
         /// </returns>
         /// 
         [ResponseType(typeof(ReplaceOneResult))]
-        [Authorize(Roles = "Asset, Administrator, Enterprise, BackOfficeAdmin")]
+        [Authorize]
         [Route("api/Job/{jobId}/order")]
         [HttpPut]
         public async Task<IHttpActionResult> UpdateOrder([FromUri]string jobId, [FromBody]OrderModel orderModel)
         {
-            ReplaceOneResult result = await repository.UpdateOrder(jobId, orderModel);
+            if (orderModel == null) return BadRequest("Null order payload provided");
+            if (ModelState.IsValid) return BadRequest(ModelState);
+
+            var currentUserId = this.User.Identity.GetUserId();
+            var job = await repository.GetJob(jobId);
+
+            if (!this.User.IsInRole(RoleNames.ROLE_ADMINISTRATOR)
+                && !this.User.IsInRole(RoleNames.ROLE_BACKOFFICEADMIN))
+            {
+                if (orderModel.UserId != null && orderModel.UserId != currentUserId)
+                    throw new InvalidOperationException(string.Format(
+                        "Updating user id {0} is not authorized against user id {1}", 
+                        orderModel.UserId, this.User.Identity.GetUserId()));
+            }
+            else if( this.User.IsInRole(RoleNames.ROLE_USER) || 
+                this.User.IsInRole(RoleNames.ROLE_ENTERPRISE))
+            {
+                if (job.User.UserId != currentUserId)
+                    throw new UnauthorizedAccessException("Job belongs to a different user");
+            }
+            else
+            {
+                if (!job.Assets.Any(x => x.Key == currentUserId))
+                    throw new UnauthorizedAccessException($"{currentUserId} is not an associated asset with this job");
+            }
+
+            ReplaceOneResult result = await repository.UpdateOrder(job, orderModel);
             return Json(result);
         }
-
     }
 }
