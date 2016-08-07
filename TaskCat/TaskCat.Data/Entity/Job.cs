@@ -11,6 +11,7 @@
     using System.Linq;
     using Model.Payment;
 
+    [BsonIgnoreExtraElements(Inherited = true)]
     public class Job : HRIDEntity
     {
         [BsonIgnore]
@@ -129,7 +130,7 @@
 
         public void CompleteJob()
         {
-            if (Tasks.All(x => x.State == JobTaskState.COMPLETED))
+            if (!Tasks.All(x => x.State == JobTaskState.COMPLETED))
             {
                 throw new NotSupportedException("Setting Job State to COMPLETED when all the job Tasks are not completed");
             }

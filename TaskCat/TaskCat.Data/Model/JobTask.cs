@@ -7,6 +7,7 @@
     using Utility;
     using Identity.Response;
 
+    [BsonIgnoreExtraElements(Inherited = true)]
     public abstract class JobTask
     {
         protected string Name;
@@ -175,17 +176,22 @@
         {
             if (State == JobTaskState.IN_PROGRESS)
             {
-                InitiationTime = DateTime.UtcNow;
+                InitiationTime = InitiationTime ?? DateTime.UtcNow;
                 if (!IsReadytoMoveToNextTask)
                     return;
             }
 
-            if (state < JobTaskState.COMPLETED)
+            if (State < JobTaskState.COMPLETED)
+            {
+                State++;
+            }
+
+            while (IsReadytoMoveToNextTask && State<JobTaskState.COMPLETED)
                 State++;
 
-            while (IsReadytoMoveToNextTask && state<JobTaskState.COMPLETED)
-                State++;
-            
+            if (State >= JobTaskState.IN_PROGRESS)
+                InitiationTime = InitiationTime ?? DateTime.UtcNow;
+
             if (State == JobTaskState.COMPLETED && IsReadytoMoveToNextTask)
                 NotifyJobTaskCompleted();
             else if(State == JobTaskState.COMPLETED && !IsReadytoMoveToNextTask)

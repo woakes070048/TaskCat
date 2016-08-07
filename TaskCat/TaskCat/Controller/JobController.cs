@@ -271,7 +271,7 @@
             }
             else
             {
-                throw new NotImplementedException("Invoice for this job type is still not implemented");
+                throw new NotImplementedException($"Invoice for job type {job.Order.Type} is still not implemented");
             }
         }
 
@@ -364,9 +364,11 @@
         [ResponseType(typeof(UpdateResult<Job>))]
         [HttpPost]
         [Authorize(Roles = "Administrator, BackOfficeAdmin")]
-        [Route("api/Job/cancel/{jobId}")]
-        public async Task<IHttpActionResult> CancelJob(JobCancellationRequest request)
+        [Route("api/Job/cancel")]
+        public async Task<IHttpActionResult> CancelJob([FromBody]JobCancellationRequest request)
         {
+            if (request == null) return BadRequest("null request encountered");
+            if (!ModelState.IsValid) return BadRequest(ModelState);
             return Json(await repository.CancelJob(request));
         }
 
